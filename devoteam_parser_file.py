@@ -16,7 +16,15 @@ class DevoteamScanResultParserParser:
     def get_findings(self, filename, test):
         findings = []
 
-        data = json.load(filename)
+        raw_data = filename.read()
+
+        if isinstance(raw_data, bytes):
+            try:
+                raw_data = raw_data.decode("utf-8")
+            except UnicodeDecodeError:
+                raw_data = raw_data.decode("cp1252")
+
+        data = json.loads(raw_data)
 
         if isinstance(data, dict):
             items = (
