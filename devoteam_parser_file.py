@@ -1,6 +1,15 @@
 import json
 import hashlib
-from dojo.models import Finding, Endpoint
+import re
+
+from django.conf import settings
+
+from dojo.models import Finding
+
+if not settings.V3_FEATURE_LOCATIONS:
+    from dojo.models import Endpoint
+
+from dojo.tools.locations import LocationData
 
 
 class DevoteamScanResultParserParser:
@@ -111,15 +120,51 @@ class DevoteamScanResultParserParser:
                 static_finding=False,
                 dynamic_finding=True,
                 unique_id_from_tool=unique_id,
+                vuln_id_from_tool=vulnerability_id,
             )
 
-            if asset:
-                endpoint = Endpoint(host=asset)
-                finding.unsaved_endpoints = [endpoint]
+            self.attach_asset_location(finding, asset)
 
             findings.append(finding)
 
         return findings
+
+    def attach_asset_location(self, finding, asset):
+        if not asset:
+            return
+
+        location_host = self.normalize_asset_for_location(asset)
+
+        if settings.V3_FEATURE_LOCATIONS:
+            location = LocationData.url(host=location_host)
+            if not hasattr(finding, "unsaved_locations") or finding.unsaved_locations is None:
+                finding.unsaved_locations = []
+            finding.unsaved_locations.append(location)
+        else:
+            location = Endpoint(host=location_host)
+            if not hasattr(finding, "unsaved_endpoints") or finding.unsaved_endpoints is None:
+                finding.unsaved_endpoints = []
+            finding.unsaved_endpoints.append(location)
+
+    def normalize_asset_for_location(self, asset):
+        value = self.clean(asset)
+
+        if not value:
+            return ""
+
+        value = value.strip().lower()
+
+        # Location URL host should be host-like.
+        # Asset names such as "ISP VM" or "Network WiFi VLAN PAX"
+        # are converted into host-safe values.
+        value = re.sub(r"[^a-z0-9.-]+", "-", value)
+        value = re.sub(r"-+", "-", value)
+        value = value.strip("-.")
+
+        if not value:
+            value = "unknown-asset"
+
+        return value
 
     def build_description(
         self,
