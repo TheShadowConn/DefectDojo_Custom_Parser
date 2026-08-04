@@ -1,6 +1,6 @@
 import json
 import hashlib
-from dojo.models import Finding
+from dojo.models import Finding, Endpoint
 
 
 class DevoteamScanResultParserParser:
@@ -112,6 +112,10 @@ class DevoteamScanResultParserParser:
                 dynamic_finding=True,
                 unique_id_from_tool=unique_id,
             )
+
+            if asset:
+                endpoint = Endpoint(host=asset)
+                finding.unsaved_endpoints = [endpoint]
 
             findings.append(finding)
 
