@@ -19,7 +19,7 @@ class DevoteamScanResultV3Parser:
         return "Devoteam Scan Result V3"
 
     def get_description_for_scan_types(self, scan_type):
-        return "Parser for Devoteam / pentest JSON scan results with V3 Locations support."
+        return "Parser for Devoteam / pentest JSON scan results with CVSS and V3 Locations support."
 
     def get_findings(self, filename, test):
         findings = []
@@ -52,6 +52,7 @@ class DevoteamScanResultV3Parser:
             details = self.clean(item.get("Details"))
             impact = self.clean(item.get("Impact"))
             recommendations = self.clean(item.get("Recommendations"))
+            cvss = self.clean(item.get("CVSS"))
 
             title = description_value
             if not title or title == "N/A":
@@ -65,27 +66,33 @@ class DevoteamScanResultV3Parser:
                 vulnerability_type=vulnerability_type,
                 description_value=description_value,
                 details=details,
+                cvss=cvss,
             )
 
-            finding = Finding(
-                title=title,
-                test=test,
-                severity=severity,
-                description=description,
-                mitigation=recommendations if recommendations != "N/A" else "",
-                impact=impact if impact != "N/A" else "",
-                active=True,
-                verified=False,
-                static_finding=False,
-                dynamic_finding=True,
-                unique_id_from_tool=self.generate_unique_id(
+            finding_kwargs = {
+                "title": title,
+                "test": test,
+                "severity": severity,
+                "description": description,
+                "mitigation": recommendations if recommendations != "N/A" else "",
+                "impact": impact if impact != "N/A" else "",
+                "active": True,
+                "verified": False,
+                "static_finding": False,
+                "dynamic_finding": True,
+                "unique_id_from_tool": self.generate_unique_id(
                     vulnerability_id=vulnerability_id,
                     asset=asset,
                     title=title,
                     severity=severity,
+                    cvss=cvss,
                 ),
-                vuln_id_from_tool=vulnerability_id if vulnerability_id != "N/A" else "",
-            )
+                "vuln_id_from_tool": vulnerability_id if vulnerability_id != "N/A" else "",
+            }
+
+            self.add_cvss_to_finding_kwargs(finding_kwargs, cvss)
+
+            finding = Finding(**finding_kwargs)
 
             self.attach_asset_to_host_or_location(finding, asset, ip, url)
 
@@ -115,6 +122,7 @@ class DevoteamScanResultV3Parser:
         vulnerability_type,
         description_value,
         details,
+        cvss,
     ):
         return f"""
 Vulnerability ID: {vulnerability_id}
@@ -122,6 +130,7 @@ Asset Name: {asset}
 URL: {url}
 IP: {ip}
 Vulnerability Type: {vulnerability_type}
+CVSS: {cvss}
 
 Description:
 {description_value}
@@ -129,6 +138,26 @@ Description:
 Details:
 {details}
 """.strip()
+
+    def add_cvss_to_finding_kwargs(self, finding_kwargs, cvss):
+        if not cvss or cvss == "N/A":
+            return
+
+        cvss = cvss.strip()
+
+        # CVSS vector, example:
+        # CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H
+        if cvss.upper().startswith("CVSS:"):
+            finding_kwargs["cvssv3"] = cvss
+            return
+
+        # Numeric score, example: 8.8
+        try:
+            score = float(cvss)
+            if 0.0 <= score <= 10.0:
+                finding_kwargs["cvssv3_score"] = score
+        except ValueError:
+            return
 
     def attach_asset_to_host_or_location(self, finding, asset, ip, url):
         host_value = self.get_best_host_value(asset, ip, url)
@@ -211,6 +240,7 @@ Details:
             "â€": '"',
             "â€“": "-",
             "â€”": "-",
+            "\\_": "_",
         }
 
         for old, new in replacements.items():
@@ -240,6 +270,6 @@ Details:
 
         return "Info"
 
-    def generate_unique_id(self, vulnerability_id, asset, title, severity):
-        raw_value = f"{vulnerability_id}|{asset}|{title}|{severity}"
+    def generate_unique_id(self, vulnerability_id, asset, title, severity, cvss):
+        raw_value = f"{vulnerability_id}|{asset}|{title}|{severity}|{cvss}"
         return hashlib.sha256(raw_value.encode("utf-8")).hexdigest()
