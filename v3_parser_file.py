@@ -116,8 +116,21 @@ class DevoteamScanResultParserV3:
                 kwargs["cvssv3"] = cvss_vector
 
             finding = Finding(**kwargs)
-            findings.append(finding)
 
+            locations = []
+
+            if url:
+                locations.append(url)
+
+            elif ip:
+                locations.append(ip)
+
+            elif asset:
+                locations.append(asset)
+
+            finding.unsaved_endpoints = locations
+
+            findings.append(finding)
         return findings
 
     def pick(self, item, keys):
