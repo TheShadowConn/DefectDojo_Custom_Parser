@@ -5,7 +5,7 @@ import re
 from dojo.models import Finding
 
 
-class DevoteamScanResultParserV3:
+class IngestV3Parser:
     def get_scan_types(self):
         return ["Devoteam Scan Result Parser V3"]
 
