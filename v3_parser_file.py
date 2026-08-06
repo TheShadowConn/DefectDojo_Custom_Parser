@@ -7,10 +7,10 @@ from dojo.models import Finding
 
 class IngestV3Parser:
     def get_scan_types(self):
-        return ["Devoteam Scan Result Parser V3"]
+        return ["IngestV3Parser"]
 
     def get_label_for_scan_types(self, scan_type):
-        return "Devoteam Scan Result Parser V3"
+        return "IngestV3Parser"
 
     def get_description_for_scan_types(self, scan_type):
         return "Parser for Devoteam and SES pentest finding JSON converted from CSV/XLSX."
