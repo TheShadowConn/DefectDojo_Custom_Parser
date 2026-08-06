@@ -2,7 +2,12 @@ import hashlib
 import json
 import re
 
-from dojo.models import Finding
+from dojo.models import Finding, Endpoint
+
+try:
+    from dojo.models import LocationData
+except Exception:
+    LocationData = None
 
 
 class IngestV3Parser:
@@ -36,25 +41,127 @@ class IngestV3Parser:
             if not isinstance(item, dict):
                 continue
 
-            asset = self.pick(item, ["Asset", "Host", "Affected Asset", "Target"])
-            url = self.pick(item, ["URL", "Uri", "Link"])
-            ip = self.pick(item, ["IP", "IP Address", "Host IP"])
+            asset = self.pick(item, ["Asset", "Host", "Affected Asset", "Target", "Endpoint"])
+            url = self.pick(item, ["URL", "Uri", "URI", "Link"])
+            ip = self.pick(item, ["IP", "IP Address", "Host IP", "Address"])
+
             vulnerability_id = self.pick(item, ["Vulnerability ID", "Vuln ID", "Finding ID", "ID"])
             status = self.pick(item, ["Status", "State"])
             vulnerability_type = self.pick(item, ["Vulnerability Type", "Type", "Finding Type"])
-            finding_name = self.pick(item, ["Finding Name", "Devoteam Findings", "Title", "Name", "Vulnerability Name"])
-            severity_value = self.pick(item, ["Risk According to SES", "Risk According to Devoteam", "Severity", "Risk"])
-            cvss = self.pick(item, ["CVSS", "CVSS according to Devoteam", "CVSS Score", "CVSS Risk"])
+
+            finding_name = self.pick(
+                item,
+                [
+                    "Finding Name",
+                    "Devoteam Findings",
+                    "Title",
+                    "Name",
+                    "Vulnerability Name",
+                    "Vulnerability Type",
+                ],
+            )
+
+            severity_value = self.pick(
+                item,
+                [
+                    "Risk According to SES",
+                    "Risk According to Devoteam",
+                    "Severity",
+                    "Risk",
+                ],
+            )
+
+            cvss = self.pick(
+                item,
+                [
+                    "CVSS",
+                    "CVSS according to Devoteam",
+                    "CVSS Score",
+                    "CVSS Risk",
+                ],
+            )
+
             description_text = self.pick(item, ["Description", "Summary"])
             details = self.pick(item, ["Details", "Technical Details", "Observation", "Finding Details"])
-            impact = self.pick(item, ["Impact", "SES Contextual Comments on Impact", "Business Impact", "Security Impact"])
-            recommendation = self.pick(item, ["Recommendations", "Devoteam recommendations Description", "Devoteam recommendations", "Recommendation", "Remediation", "Solution"])
-            recommendation_type_detail = self.pick(item, ["Recommendation Type Detail", "Recommendation Detail", "Remediation Detail"])
-            remediation_owner = self.pick(item, ["SES Remediation Owner", "Remediation Owner", "Owner"])
-            target_closure_date = self.pick(item, ["Target Closure Date (DD.MM.YYYY)", "Target Closure Date", "Closure Date", "Due Date"])
-            evidence_for_closure = self.pick(item, ["Justification / Evidence for Closure", "Evidence for Closure", "Evidence"])
-            cleaning_steps = self.pick(item, ["SES Cleaning Steps", "Cleaning Steps", "Remediation Steps"])
-            additional_comments = self.pick(item, ["SES Additional Comments and Notes", "Additional Comments", "Comments", "Notes"])
+
+            impact = self.pick(
+                item,
+                [
+                    "Impact",
+                    "SES Contextual Comments on Impact",
+                    "Business Impact",
+                    "Security Impact",
+                ],
+            )
+
+            recommendation = self.pick(
+                item,
+                [
+                    "Recommendations",
+                    "Devoteam recommendations Description",
+                    "Devoteam recommendations",
+                    "Recommendation",
+                    "Remediation",
+                    "Solution",
+                ],
+            )
+
+            recommendation_type_detail = self.pick(
+                item,
+                [
+                    "Recommendation Type Detail",
+                    "Recommendation Detail",
+                    "Remediation Detail",
+                ],
+            )
+
+            remediation_owner = self.pick(
+                item,
+                [
+                    "SES Remediation Owner",
+                    "Remediation Owner",
+                    "Owner",
+                ],
+            )
+
+            target_closure_date = self.pick(
+                item,
+                [
+                    "Target Closure Date (DD.MM.YYYY)",
+                    "Target Closure Date",
+                    "Closure Date",
+                    "Due Date",
+                ],
+            )
+
+            evidence_for_closure = self.pick(
+                item,
+                [
+                    "Justification / Evidence for Closure",
+                    "Evidence for Closure",
+                    "Evidence",
+                ],
+            )
+
+            cleaning_steps = self.pick(
+                item,
+                [
+                    "SES Cleaning Steps",
+                    "Cleaning Steps",
+                    "Remediation Steps",
+                ],
+            )
+
+            additional_comments = self.pick(
+                item,
+                [
+                    "SES Additional Comments and Notes",
+                    "Additional Comments",
+                    "Comments",
+                    "Notes",
+                ],
+            )
+
             references = self.pick(item, ["References", "Reference", "Links"])
             source_file = self.pick(item, ["Source File", "Filename", "File"])
 
@@ -117,21 +224,77 @@ class IngestV3Parser:
 
             finding = Finding(**kwargs)
 
-            locations = []
-
-            if url:
-                locations.append(url)
-
-            elif ip:
-                locations.append(ip)
-
-            elif asset:
-                locations.append(asset)
-
-            finding.unsaved_endpoints = locations
+            self.attach_endpoints_and_locations(
+                finding=finding,
+                url=url,
+                ip=ip,
+                asset=asset,
+            )
 
             findings.append(finding)
+
         return findings
+
+    def attach_endpoints_and_locations(self, finding, url, ip, asset):
+        location_values = self.build_location_values(url=url, ip=ip, asset=asset)
+
+        endpoints = []
+        locations = []
+
+        for location in location_values:
+            try:
+                endpoints.append(Endpoint.from_uri(location))
+            except Exception:
+                pass
+
+            if LocationData:
+                try:
+                    locations.append(LocationData.url(url=location))
+                except Exception:
+                    pass
+
+        if endpoints:
+            finding.unsaved_endpoints = endpoints
+
+        if locations:
+            finding.unsaved_locations = locations
+
+    def build_location_values(self, url, ip, asset):
+        candidates = []
+
+        for value in [url, ip, asset]:
+            value = self.clean(value)
+
+            if not value:
+                continue
+
+            split_values = re.split(r"[,;\n]+", value)
+
+            for split_value in split_values:
+                split_value = self.clean(split_value)
+
+                if not split_value:
+                    continue
+
+                candidates.append(split_value)
+
+        normalized = []
+
+        for value in candidates:
+            value = value.strip()
+
+            if not value:
+                continue
+
+            if value.startswith("http://") or value.startswith("https://"):
+                location = value
+            else:
+                location = f"http://{value}"
+
+            if location not in normalized:
+                normalized.append(location)
+
+        return normalized
 
     def pick(self, item, keys):
         for key in keys:
@@ -139,56 +302,84 @@ class IngestV3Parser:
                 value = self.clean(item.get(key))
                 if value:
                     return value
+
         lower_map = {str(k).strip().lower(): k for k in item.keys()}
+
         for key in keys:
             actual = lower_map.get(str(key).strip().lower())
+
             if actual is not None:
                 value = self.clean(item.get(actual))
                 if value:
                     return value
+
         return ""
 
     def clean(self, value):
         if value is None:
             return ""
+
         value = str(value)
+
         value = value.replace("\ufeff", "")
         value = value.replace("\u00a0", " ")
         value = value.replace("_x000D_", "\n")
-        value = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]", "", value)
-        value = value.replace("\r\n", "\n").replace("\r", "\n")
+
+        value = re.sub(
+            r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]",
+            "",
+            value,
+        )
+
+        value = value.replace("\r\n", "\n")
+        value = value.replace("\r", "\n")
+
         value = re.sub(r"[ \t]+", " ", value)
         value = re.sub(r"\n{3,}", "\n\n", value)
+
         return value.strip()
 
     def map_severity(self, value):
         value = self.clean(value).lower()
+
         if value in ["critical", "crit"]:
             return "Critical"
+
         if value in ["high", "h"]:
             return "High"
+
         if value in ["medium", "med", "moderate", "m"]:
             return "Medium"
+
         if value in ["low", "l"]:
             return "Low"
+
         if value in ["info", "informational", "information"]:
             return "Info"
+
         try:
             score = float(re.findall(r"\d+(?:\.\d+)?", value)[0])
+
             if score >= 9.0:
                 return "Critical"
+
             if score >= 7.0:
                 return "High"
+
             if score >= 4.0:
                 return "Medium"
+
             if score > 0.0:
                 return "Low"
+
         except Exception:
             pass
+
         return "Info"
 
     def is_active(self, status):
         status = self.clean(status).lower()
+
         closed_statuses = [
             "closed",
             "done",
@@ -201,13 +392,21 @@ class IngestV3Parser:
             "false positive",
             "duplicate",
         ]
+
         return status not in closed_statuses
 
     def extract_cvss_vector(self, cvss):
         cvss = self.clean(cvss)
-        match = re.search(r"CVSS:3\.[01]/[^\s]+", cvss, flags=re.IGNORECASE)
+
+        match = re.search(
+            r"CVSS:3\.[01]/[^\s]+",
+            cvss,
+            flags=re.IGNORECASE,
+        )
+
         if match:
             return match.group(0)
+
         return ""
 
     def build_description(
@@ -247,23 +446,34 @@ class IngestV3Parser:
             ("SES Additional Comments and Notes", additional_comments),
             ("Source File", source_file),
         ]
+
         output = []
+
         for label, value in sections:
             value = self.clean(value)
+
             if value:
                 output.append(f"{label}:\n{value}")
+
         return "\n\n".join(output) if output else "No description provided."
 
     def build_mitigation(self, recommendation, recommendation_type_detail):
         sections = []
+
         recommendation = self.clean(recommendation)
         recommendation_type_detail = self.clean(recommendation_type_detail)
+
         if recommendation:
             sections.append(f"Recommendation:\n{recommendation}")
+
         if recommendation_type_detail:
             sections.append(f"Recommendation Type Detail:\n{recommendation_type_detail}")
+
         return "\n\n".join(sections) if sections else "No mitigation provided."
 
     def generate_unique_id(self, asset, url, ip, vulnerability_id, finding_name, cvss):
         raw_value = f"{asset}|{url}|{ip}|{vulnerability_id}|{finding_name}|{cvss}"
-        return hashlib.sha256(raw_value.encode("utf-8")).hexdigest()
+
+        return hashlib.sha256(
+            raw_value.encode("utf-8")
+        ).hexdigest()
